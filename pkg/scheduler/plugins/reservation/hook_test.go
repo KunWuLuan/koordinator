@@ -22,8 +22,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	schedulingv1alpha1 "github.com/koordinator-sh/koordinator/apis/scheduling/v1alpha1"
@@ -393,6 +396,24 @@ func Test_preparePreFilterNodeInfo(t *testing.T) {
 					},
 				},
 			},
+			Volumes: []v1.Volume{
+				{
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "claim-with-rwop",
+						},
+					},
+				},
+			},
+		},
+	}
+	readWriteOncePodPVC := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "claim-with-rwop",
+		},
+		Spec: v1.PersistentVolumeClaimSpec{
+			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOncePod},
 		},
 	}
 	testNodeName := "test-node-0"
@@ -431,11 +452,16 @@ func Test_preparePreFilterNodeInfo(t *testing.T) {
 		},
 	}
 	matchedCache := newAvailableCache(rScheduled)
+
+	fh := &fakeExtendedHandle{
+		informerFactory: informers.NewSharedInformerFactory(kubefake.NewSimpleClientset(readWriteOncePodPVC), 0),
+	}
 	t.Run("test not panic", func(t *testing.T) {
-		preparePreFilterNodeInfo(testNodeInfo, normalPod, matchedCache)
+		preparePreFilterNodeInfo(fh, testNodeInfo, normalPod, matchedCache)
 		for _, podInfo := range testNodeInfo.PodsWithRequiredAntiAffinity {
 			assert.Nil(t, podInfo.RequiredAntiAffinityTerms)
 		}
+		assert.Zero(t, testNodeInfo.PVCRefCounts["default/claim-with-rwop"])
 	})
 }
 
